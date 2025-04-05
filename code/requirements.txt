@@ -1,0 +1,4 @@
+openai==0.27.8
+google-auth==2.23.0
+google-auth-oauthlib==1.0.0
+google-api-python-client==2.100.0
