@@ -1,13 +1,7 @@
 import base64
-import os
 import re
 from email.mime.text import MIMEText
 from datetime import datetime, timedelta
-
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
-from googleapiclient.discovery import build
 
 
 def get_unread_emails(service, user_id="me"):
@@ -149,8 +143,19 @@ def get_unanswered_emails_this_week(service, user_id="me", exclude_labels=None):
                 body = base64.urlsafe_b64decode(body_data).decode("utf-8")
                 break
 
+        message_id = next(
+            (
+                header["value"]
+                for header in msg["payload"]["headers"]
+                if header["name"].lower() == "message-id"
+            ),
+            None,
+        )
+
         email_info = {
             "id": msg_id,
+            "threadId": msg.get("threadId"),
+            "messageId": message_id,
             "name": sender_name,
             "address": sender_email,
             "subject": subject,
@@ -246,45 +251,6 @@ def tag_as_drafted(service, user_id, msg_id):
         print(f"An error occurred tagging the message: {error}")
         return False
 
-
-def get_service(scopes):
-    """
-    Creates a Gmail API service client.
-
-    Args:
-        scopes (list): A list of strings representing the API scopes.
-
-    Returns:
-        An authorized Gmail API service client.
-    """
-    creds = None
-    # The file token.json stores the user's access and refresh tokens, and is
-    # created automatically when the authorization flow completes for the first time.
-    if os.path.exists("token.json"):
-        try:
-            creds = Credentials.from_authorized_user_file("token.json", scopes)
-            # Check if the refresh_token is missing
-            if not creds.refresh_token:
-                raise ValueError("Missing refresh_token in token.json")
-        except Exception as error:
-            print(f"Invalid token.json file: {error}")
-            creds = None
-
-    # If there are no (valid) credentials available, let the user log in.
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            flow = InstalledAppFlow.from_client_secrets_file("credentials.json", scopes)
-            creds = flow.run_local_server(port=8080)
-        # Save the credentials for the next run
-        with open("token.json", "w") as token:
-            token.write(creds.to_json())
-
-    service = build("gmail", "v1", credentials=creds)
-    return service
-
-
 def create_message(sender, to, subject, message_text):
     """
     Creates a message
@@ -302,13 +268,10 @@ def create_message(sender, to, subject, message_text):
     message["to"] = to
     message["from"] = sender
     message["subject"] = subject
-    # print(
-    #     f"Created message from {sender} to {to}\nSubject: {subject}\nContent: {message_text}"
-    # )
     return {"raw": base64.urlsafe_b64encode(message.as_bytes()).decode()}
 
 
-def send_message(service: build, user_id, message):
+def send_message(service, user_id, message):
     """
     Sends an email message.
 
@@ -370,8 +333,8 @@ def create_draft_reply(service, user_id, original_email, reply_content):
         message["to"] = original_email["address"]
         message["from"] = user_id
         message["subject"] = reply_subject
-        message["In-Reply-To"] = original_email["id"]
-        message["References"] = original_email["id"]
+        message["In-Reply-To"] = original_email["messageId"]
+        message["References"] = original_email["messageId"]
 
         raw_message = {
             "raw": base64.urlsafe_b64encode(message.as_bytes()).decode(),
@@ -399,10 +362,6 @@ def respond_to_mails(service, sender_adress, user_id):
 
     for email in unread_emails[0:5]:
         if email["subject"].lower() == "info":
-            # print("\nMAIL FOUND\n==================================")
-            # print(
-            #     f'Sender: {email["name"]}\nAddress: {email["address"]}\nContent: {email["body"]}'
-            # )
 
             response_text = f'Hej {email["name"]}. Det här är ska senare vara svaret till frågan: {email["body"]}'
 
